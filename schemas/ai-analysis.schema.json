@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ScanForgeAIAnalysis",
+  "type": "object",
+  "required": ["executive_summary", "risk_level", "priority_fixes"],
+  "properties": {
+    "executive_summary": {"type": "string"},
+    "risk_level": {"enum": ["low", "medium", "high", "critical"]},
+    "business_impact": {"type": "string"},
+    "priority_fixes": {"type": "array"},
+    "false_positive_notes": {"type": "array"},
+    "technology_specific_recommendations": {"type": "array"},
+    "next_scan_recommendation": {"type": "string"}
+  }
+}

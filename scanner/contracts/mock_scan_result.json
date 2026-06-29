@@ -1,0 +1,44 @@
+{
+  "contract_version": "phase01.mock.v1",
+  "scan_id": null,
+  "website_id": null,
+  "status": "completed",
+  "scan_type": "mock",
+  "target": {
+    "url": "https://example.com",
+    "normalized_host": "example.com",
+    "verified": true
+  },
+  "technologies": [
+    {
+      "name": "Generic Web",
+      "category": "platform",
+      "version": null,
+      "confidence": 0.5,
+      "source": "mock"
+    }
+  ],
+  "findings": [
+    {
+      "title": "Mock missing security header",
+      "severity": "info",
+      "confidence": 0.75,
+      "affected_url": "https://example.com/",
+      "source_tool": "scanforge-mock",
+      "cwe": "CWE-693",
+      "cve": null,
+      "cvss": null,
+      "owasp_category": "A05 Security Misconfiguration",
+      "evidence": "Synthetic Phase 01 finding for normalization contract validation.",
+      "remediation": "Replace mock scanner with safe adapters in later phases.",
+      "fingerprint_hash": "phase01-mock-missing-security-header"
+    }
+  ],
+  "artifacts": [
+    {
+      "tool_name": "scanforge-mock",
+      "file_path": "/data/mock-scan-result.json",
+      "json_payload": true
+    }
+  ]
+}
