@@ -2,21 +2,23 @@
 
 ScanForge is a premium, AI-assisted web security audit platform for websites that the user owns or is explicitly authorized to test. The system starts with domain registration and verification, plans safe checks by technology, normalizes findings, and prepares AI Analyst reports from evidence only.
 
-Phase 01 set up the foundation: Laravel 12 API, React/Vite dashboard shell, PostgreSQL, Redis, queue-ready backend, mock scanner worker, and Docker Compose local development. Phase 02 adds Sanctum auth, workspace-scoped websites, ownership verification, safer target validation, mock scan permission gates, and future-ready scanner data models. Phase 03 adds verified passive asset discovery, HTTP fingerprint snapshots, DNS/IP/TLS observations, security header and cookie matrices, passive findings, technology hints, and an asset detail dashboard. Phase 04 adds plugin-based technology fingerprinting, immutable evidence, technology graph export, capability resolution, safe scan plan prediction, and a technology tree UI. Phase 05 adds safe scan orchestration, priority queues, worker registry/heartbeat, distributed lock, retry/cancellation contracts, job timelines/logs, mock executor progress, worker metrics, and future scanner interfaces.
+Phase 01 set up the foundation: Laravel 12 API, React/Vite dashboard shell, PostgreSQL, Redis, queue-ready backend, mock scanner worker, and Docker Compose local development. Phase 02 adds Sanctum auth, workspace-scoped websites, ownership verification, safer target validation, mock scan permission gates, and future-ready scanner data models. Phase 03 adds verified passive asset discovery, HTTP fingerprint snapshots, DNS/IP/TLS observations, security header and cookie matrices, passive findings, technology hints, and an asset detail dashboard. Phase 04 adds plugin-based technology fingerprinting, immutable evidence, technology graph export, capability resolution, safe scan plan prediction, and a technology tree UI. Phase 05 adds safe scan orchestration, priority queues, worker registry/heartbeat, distributed lock, retry/cancellation contracts, job timelines/logs, mock executor progress, worker metrics, and future scanner interfaces. Phase 06 adds the scanner adapter registry, safe Nuclei adapter, template policy, execution sandbox, raw artifact manifests, scanner version/metrics tracking, finding dedupe and finding history. Phase 07 adds the central Finding Engine: taxonomy, canonical finding library, source/evidence attachments, scanner-independent correlation, risk scoring, risk/confidence history, suppression rules, website risk rollup, scan deltas and a findings panel.
 
 ## Safety Boundary
 
 - Active scanning is designed to require verified domains.
 - `ALLOW_UNVERIFIED_DOMAINS=false` is the default.
-- Phase 05 does not run Nuclei, ZAP, WPScan, testssl.sh, httpx, crawlers, brute force, DoS, or exploit tools.
-- Scanner output is mock-only and follows the normalized finding contract.
+- Nuclei is disabled by default with `NUCLEI_ENABLED=false` and only runs through orchestrated scan jobs.
+- ZAP, WPScan, testssl.sh, httpx, crawlers, brute force, fuzzing, DoS, intrusive and destructive templates remain disabled.
+- Scanner output follows the normalized finding contract.
+- Finding Engine output is scanner-independent and uses canonical findings, taxonomy and evidence attachments.
 - Verification tokens are not stored plaintext; only `verification_token_hash` is persisted.
 - Website credentials are stored with Laravel encrypted casts and are not used for real authenticated scans yet.
 - Passive discovery is verified-domain only; private/reserved DNS resolution blocks HTTP probing.
 - Cookie values are not stored by cookie observations.
 - Fingerprint evidence is immutable; new observations create new evidence rows.
 - Scan plans are recommendations only and are not execution approval.
-- Scan orchestration still uses `MockExecutorService` only.
+- Scanner orchestration resolves adapters through `ScannerRegistry`; mock fallback can remain enabled for non-Nuclei scanner keys.
 - Deep scan is disabled by default with `SCANFORGE_ENABLE_DEEP_SCAN=false`.
 - Secrets must live in `.env` or deployment environment variables, never in code.
 
@@ -59,6 +61,8 @@ docker compose up --build
 
 ```bash
 docker compose exec backend php artisan migrate
+docker compose exec backend php artisan db:seed --class=ScannerTemplatePolicySeeder
+docker compose exec backend php artisan db:seed --class=TemplateManifestSeeder
 ```
 
 5. Open the services:
@@ -73,6 +77,7 @@ UI routes:
 - Register: `http://localhost:3003/register`
 - Websites: `http://localhost:3003/websites`
 - Website asset detail: `http://localhost:3003/websites/{id}`
+- Website findings: `http://localhost:3003/websites/{id}` Findings panel
 
 ## Useful Commands
 
@@ -83,6 +88,22 @@ docker compose exec backend php artisan test
 docker compose exec frontend npm run build
 docker compose logs -f backend queue scanner
 ```
+
+## Nuclei Local Setup
+
+The backend and queue image install Nuclei `3.10.0` by default and clone `nuclei-templates` into `/opt/nuclei-templates`.
+
+Nuclei remains off unless explicitly enabled:
+
+```bash
+NUCLEI_ENABLED=true
+NUCLEI_BINARY_PATH=/usr/local/bin/nuclei
+NUCLEI_TEMPLATES_PATH=/opt/nuclei-templates
+NUCLEI_MAX_REQUESTS=100
+NUCLEI_RATE_LIMIT_PER_SECOND=2
+```
+
+Only verified websites with consent and a ready scan plan item can reach the Nuclei adapter. Template policies are seeded into `scanner_template_policies`; blocked tags still override allowed groups.
 
 ## Phase 02 API Smoke Test
 
@@ -171,3 +192,22 @@ curl -s http://localhost:8000/api/websites/1/scans \
 - Scan plan items create priority queued `ScanJob` rows with retry policy, execution budget and cancellation token.
 - `ExecuteScanJob` runs mock-only lifecycle and writes timeline, logs, worker heartbeat and mock raw artifact records.
 - `/websites/{id}` shows scan status, progress, selected plan, safety mode and job table.
+
+## Phase 06 Acceptance
+
+- `ExecuteScanJob` resolves scanner adapters through `ScannerRegistry`.
+- `NucleiScanner` implements `ScannerInterface` and runs only when `NUCLEI_ENABLED=true`.
+- Template policy allowlist blocks destructive, intrusive, DoS, fuzzing, brute-force and aggressive exploit groups.
+- Nuclei JSONL creates `RawArtifact`, `ArtifactManifest`, normalized findings and scanner metrics.
+- Duplicate findings update `last_seen_at` and `occurrence_count` instead of creating new rows.
+- `/websites/{id}` shows finding mini-list, severity badge, template ID and raw evidence availability for scan results.
+
+## Phase 07 Acceptance
+
+- Nuclei JSONL and passive findings pass through `FindingNormalizationService`.
+- Canonical finding, taxonomy, source, evidence, risk history and confidence history records are created.
+- Duplicate/correlated findings update `occurrence_count`, `last_seen_at` and `correlation_score`.
+- Findings API supports severity, priority, status, scanner, CVE and search filters.
+- Status changes create `finding_events`; ignored/false-positive can create suppression rules.
+- Website risk rollup updates `risk_score`, `critical_count`, `high_count` and `risk_trend`.
+- `/websites/{id}` shows the Findings panel and detail drawer.

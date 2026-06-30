@@ -1,7 +1,7 @@
 <?php
 
 return [
-    'version' => env('SCANFORGE_VERSION', '0.5.0-phase05'),
+    'version' => env('SCANFORGE_VERSION', '0.7.0-phase07'),
 
     'scanner' => [
         'allow_unverified_domains' => env('ALLOW_UNVERIFIED_DOMAINS', false),

@@ -6,12 +6,26 @@ export type DashboardSummary = {
     scans: number;
     open_findings: number;
     passive_findings?: number;
+    resolved_findings?: number;
+    false_positive_findings?: number;
     discoveries?: number;
   };
   risk: {
     average_score: number;
+    average_finding_risk_score?: number;
+    average_scan_score?: number;
     critical_findings: number;
     high_findings: number;
+    resolved_findings?: number;
+    false_positive_findings?: number;
+    top_risky_websites?: Array<{
+      id: number;
+      host: string;
+      risk_score: number | null;
+      critical_count: number;
+      high_count: number;
+      trend: string;
+    }>;
   };
   activity: {
     scans_this_week: number;
@@ -37,6 +51,23 @@ export type DashboardSummary = {
     failed_jobs: number;
     avg_job_time: number;
   };
+  scanner_versions?: Array<{
+    scanner_key: string;
+    binary_version: string | null;
+    templates_version: string | null;
+    last_checked_at: string | null;
+    status: string;
+  }>;
+  scanner_metrics?: Array<{
+    scanner_key: string;
+    runs: number;
+    success: number;
+    failed: number;
+    timeout: number;
+    avg_runtime: number;
+    avg_findings: number;
+    last_run_at: string | null;
+  }>;
 };
 
 export type HealthStatus = {
@@ -90,6 +121,9 @@ export type Website = {
   verified_at: string | null;
   security_score: number | null;
   risk_score: number | null;
+  critical_count: number;
+  high_count: number;
+  risk_trend: string;
   last_scan_score: number | null;
   last_scan_at: string | null;
   discovery_completed_at: string | null;
@@ -347,10 +381,133 @@ export type ScanRecord = {
     coverage_prediction: number;
     estimated_requests: number;
   } | null;
-  recent_findings: unknown[];
+  recent_findings: Array<{
+    id: number;
+    title: string;
+    severity: string;
+    priority?: string;
+    status: string;
+    risk_score?: number;
+    correlation_score?: number;
+    scanner_key: string | null;
+    template_id: string | null;
+    affected_url: string;
+    matched_at: string | null;
+    raw_artifact_id: number | null;
+    has_raw_evidence: boolean;
+  }>;
   artifacts_count: number;
   created_at: string | null;
   jobs?: ScanJobRecord[];
+};
+
+export type FindingListItem = {
+  id: number;
+  workspace_id: number;
+  website_id: number;
+  scan_id: number | null;
+  title: string;
+  normalized_title: string | null;
+  severity: string;
+  priority: string;
+  status: string;
+  risk_score: number;
+  confidence_score: number;
+  false_positive_risk: string;
+  correlation_score: number;
+  correlation_key: string | null;
+  scanner_key: string | null;
+  source_tool: string;
+  template_id: string | null;
+  affected_url: string;
+  affected_component: string | null;
+  affected_parameter: string | null;
+  asset_type: string | null;
+  asset_identifier: string | null;
+  cve: string[];
+  cwe: string[];
+  cvss_score: number | null;
+  owasp_category: string | null;
+  occurrence_count: number;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  resolved_at: string | null;
+  reopened_at: string | null;
+  sla_due_at: string | null;
+  analysis_required: boolean;
+  analysis_version: string;
+  analysis_status: string;
+  taxonomy: {
+    category: string;
+    subcategory: string | null;
+    owasp_category: string | null;
+    asvs_control: string | null;
+    cwe: string | null;
+    capec: string | null;
+  } | null;
+  canonical: {
+    id: number;
+    normalized_key: string;
+    default_title: string;
+  } | null;
+  sources: Array<{
+    scanner_key: string;
+    scan_job_id: number | null;
+    raw_artifact_id: number | null;
+    template_id: string | null;
+    source_severity: string | null;
+    source_confidence: number | null;
+    observed_at: string | null;
+  }>;
+};
+
+export type FindingDetail = FindingListItem & {
+  description: string | null;
+  normalized_description: string | null;
+  evidence: unknown;
+  evidence_text: string | null;
+  remediation: string | null;
+  references: string[];
+  ai_summary: string | null;
+  recommended_action: string | null;
+  related_finding: { id: number; title: string; risk_score: number } | null;
+  evidences: Array<{
+    id: number;
+    type: string;
+    mime: string;
+    sha256: string;
+    artifact_id: number | null;
+    thumbnail: string | null;
+    preview: string | null;
+  }>;
+  events: Array<{
+    old_status: string | null;
+    new_status: string;
+    reason: string | null;
+    changed_by_user_id: number | null;
+    changed_at: string | null;
+  }>;
+  risk_history: Array<{ old_score: number | null; new_score: number; reason: string | null; calculated_at: string | null }>;
+  confidence_history: Array<{ confidence: number; reason: string | null; scanner: string | null; calculated_at: string | null }>;
+};
+
+export type FindingSummary = {
+  total: number;
+  open: number;
+  average_risk_score: number;
+  severity: Record<string, number>;
+  priority: Record<string, number>;
+  status: Record<string, number>;
+  scanner_sources: Record<string, number>;
+};
+
+export type FindingFilters = {
+  severity?: string;
+  priority?: string;
+  status?: string;
+  scanner_key?: string;
+  cve?: string;
+  search?: string;
 };
 
 export type VerificationMethod = {
@@ -559,6 +716,38 @@ export async function fetchScanPlans(websiteId: string): Promise<ScanPlan[]> {
 
 export async function fetchScans(websiteId: string): Promise<ScanRecord[]> {
   return envelope<ScanRecord[]>(`/api/websites/${websiteId}/scans`);
+}
+
+export async function fetchFindings(websiteId: string, filters: FindingFilters = {}): Promise<{ data: FindingListItem[]; meta?: Record<string, unknown> }> {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) {
+      params.set(key, value);
+    }
+  });
+
+  const query = params.toString();
+  return requestJson<ApiEnvelope<FindingListItem[]>>(`/api/websites/${websiteId}/findings${query ? `?${query}` : ''}`);
+}
+
+export async function fetchFinding(websiteId: string, findingId: number): Promise<FindingDetail> {
+  return envelope<FindingDetail>(`/api/websites/${websiteId}/findings/${findingId}`);
+}
+
+export async function fetchFindingSummary(websiteId: string): Promise<FindingSummary> {
+  return envelope<FindingSummary>(`/api/websites/${websiteId}/findings/summary`);
+}
+
+export async function updateFindingStatus(
+  websiteId: string,
+  findingId: number,
+  payload: { status: string; reason?: string; create_rule?: boolean; expires_at?: string },
+): Promise<FindingDetail> {
+  return envelope<FindingDetail>(`/api/websites/${websiteId}/findings/${findingId}/status`, {
+    method: 'POST',
+    body: payload,
+  });
 }
 
 export async function fetchScan(websiteId: string, scanId: string | number): Promise<ScanRecord> {

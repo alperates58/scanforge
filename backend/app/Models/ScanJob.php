@@ -13,6 +13,7 @@ class ScanJob extends Model
 
     protected $fillable = [
         'scan_id',
+        'job_uuid',
         'workspace_id',
         'website_id',
         'scan_plan_item_id',

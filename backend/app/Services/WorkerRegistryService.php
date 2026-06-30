@@ -26,12 +26,15 @@ class WorkerRegistryService
     {
         $workerId = $this->workerId();
         $existing = Worker::query()->where('worker_id', $workerId)->first();
-        $supportedScanners = collect(config('scanner_capabilities', []))
+        $registeredScanners = array_keys((array) config('scanners.adapters', []));
+        $capabilityScanners = collect(config('scanner_capabilities', []))
             ->pluck('scanner_key')
             ->filter()
             ->unique()
             ->values()
-            ->prepend('mock')
+            ->all();
+        $supportedScanners = collect([...$registeredScanners, ...$capabilityScanners, 'mock'])
+            ->filter(fn (string $scannerKey): bool => $this->supports($scannerKey))
             ->unique()
             ->values()
             ->all();
@@ -50,7 +53,7 @@ class WorkerRegistryService
                 'max_jobs' => (int) config('scanforge.scanner.worker_max_jobs', 1),
                 'last_heartbeat' => Carbon::now(),
                 'metadata' => [
-                    'mock_only' => true,
+                    'mock_fallback_enabled' => (bool) config('scanners.fallback_to_mock', true),
                     'last_scan_job_id' => $scanJob?->id,
                 ],
             ],
@@ -63,5 +66,14 @@ class WorkerRegistryService
         WorkerHeartbeat::dispatch($worker);
 
         return $worker;
+    }
+
+    public function supports(string $scannerKey): bool
+    {
+        if ((bool) config('scanners.fallback_to_mock', true)) {
+            return true;
+        }
+
+        return array_key_exists($scannerKey, (array) config('scanners.adapters', []));
     }
 }

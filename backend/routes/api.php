@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\ScanPlanController;
 use App\Http\Controllers\Api\TechnologyFingerprintController;
 use App\Http\Controllers\Api\WebsiteController;
+use App\Http\Controllers\Api\WebsiteFindingController;
 use App\Http\Controllers\Api\WebsiteScanController;
 use Illuminate\Support\Facades\Route;
 
@@ -27,6 +28,11 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/websites', [WebsiteController::class, 'store']);
     Route::get('/websites/{website}', [WebsiteController::class, 'show']);
     Route::delete('/websites/{website}', [WebsiteController::class, 'destroy']);
+
+    Route::get('/websites/{website}/findings', [WebsiteFindingController::class, 'index']);
+    Route::get('/websites/{website}/findings/summary', [WebsiteFindingController::class, 'summary']);
+    Route::get('/websites/{website}/findings/{finding}', [WebsiteFindingController::class, 'show']);
+    Route::post('/websites/{website}/findings/{finding}/status', [WebsiteFindingController::class, 'status']);
 
     Route::get('/websites/{website}/verification', [DomainVerificationController::class, 'show']);
     Route::post('/websites/{website}/verification/check', [DomainVerificationController::class, 'check']);

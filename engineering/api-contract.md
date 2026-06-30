@@ -1,6 +1,6 @@
 # API Contract
 
-Phase 04 API token-first calisir. Health public kalir; urun endpoint'leri `Authorization: Bearer <token>` bekler. Protected endpoint'lerde opsiyonel `X-Workspace-Id` header'i kullanilabilir.
+Phase 06 API token-first calisir. Health public kalir; urun endpoint'leri `Authorization: Bearer <token>` bekler. Protected endpoint'lerde opsiyonel `X-Workspace-Id` header'i kullanilabilir.
 
 ## Response Shape
 
@@ -47,19 +47,37 @@ Phase 04 API token-first calisir. Health public kalir; urun endpoint'leri `Autho
   - `scan_plan_id` is optional; latest ready/generated plan is used when omitted.
   - Requires workspace ownership, verified website, public host, consent, ready scan plan, quota, concurrent capacity and safety gate approval.
   - Creates `Scan(status=queued)` and one `ScanJob(status=queued)` per scan plan item.
-  - Dispatches `ExecuteScanJob` to priority queues and runs `MockExecutorService` only.
+  - Dispatches `ExecuteScanJob` to priority queues after worker capability check.
+  - Scanner execution is resolved through `ScannerRegistry`; Phase 06 enables the Nuclei adapter only when `NUCLEI_ENABLED=true`.
   - Errors: `409 scan_plan_required`, `429 quota_exceeded`, `429 concurrent_scan_limit_exceeded`, `429 scan_lock_active`, `403 safety_gate_rejected`.
 - `GET /api/websites/{id}/scans`
   - Returns latest 25 scan summaries.
 - `GET /api/websites/{id}/scans/{scanId}`
-  - Returns scan summary, jobs, plan info, progress, timings, artifact count and recent findings placeholder.
+  - Returns scan summary, jobs, plan info, progress, timings, artifact count and recent finding mini-list.
+  - `recent_findings[]`: `title`, `severity`, `scanner_key`, `template_id`, `affected_url`, `matched_at`, `raw_artifact_id`, `has_raw_evidence`.
 - `GET /api/websites/{id}/scans/{scanId}/jobs`
   - Returns job contract rows for a scan.
 - `POST /api/websites/{id}/scans/{scanId}/cancel`
   - Marks queued/pending/starting/running jobs cancelled and records cooperative cancellation tokens.
 - `POST /api/websites/{id}/scans/{scanId}/retry-failed`
   - Requeues failed/timeout jobs whose `attempt_count < max_attempts`.
-  - No Nuclei, ZAP, WPScan, testssl, httpx, katana or subfinder execution.
+  - No separate "run nuclei" endpoint exists. Nuclei only runs through orchestrated scan jobs.
+
+## Findings
+
+- `GET /api/websites/{id}/findings`
+  - Authenticated and workspace-scoped.
+  - Filters: `severity`, `priority`, `status`, `scanner_key`, `cve`, `search`.
+  - Default sort: `risk_score desc`, `last_seen_at desc`.
+  - Returns normalized finding rows with taxonomy, canonical reference and scanner source badges.
+- `GET /api/websites/{id}/findings/{findingId}`
+  - Returns detail with evidence attachments, remediation, references, related finding, events, risk history and confidence history.
+- `POST /api/websites/{id}/findings/{findingId}/status`
+  - Body: `{ "status": "new|confirmed|ignored|resolved|false_positive|reopened", "reason": "...", "create_rule": false, "expires_at": null }`
+  - Creates `finding_events` and compatibility `finding_histories`.
+  - When `create_rule=true` and status is `ignored` or `false_positive`, creates a `suppression_rules` record for scanner/template/host.
+- `GET /api/websites/{id}/findings/summary`
+  - Returns severity, priority, status and scanner-source distributions plus average risk.
 
 ## Asset Discovery
 
@@ -131,4 +149,4 @@ Phase 04 API token-first calisir. Health public kalir; urun endpoint'leri `Autho
 
 - `GET /api/dashboard/summary`
   - Authenticated and workspace-scoped.
-  - Returns totals, passive findings, discovery totals, latest discovery activity, risk counters, safety defaults and workspace quota metadata.
+  - Returns totals, passive findings, discovery totals, latest discovery activity, finding risk counters, resolved/false-positive counts, top risky websites, safety defaults, workspace quota metadata, worker metrics, scanner versions and scanner metrics.

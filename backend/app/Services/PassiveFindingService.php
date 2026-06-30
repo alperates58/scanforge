@@ -10,6 +10,11 @@ use App\Models\Website;
 
 class PassiveFindingService
 {
+    public function __construct(
+        private readonly FindingNormalizationService $findingNormalizationService,
+    ) {
+    }
+
     /**
      * @param list<string> $privateIps
      */
@@ -163,32 +168,6 @@ class PassiveFindingService
      */
     private function upsert(Website $website, AssetDiscovery $discovery, array $data): Finding
     {
-        $fingerprint = hash('sha256', implode('|', [
-            $website->id,
-            'passive_discovery',
-            $data['title'],
-            json_encode($data['metadata'], JSON_UNESCAPED_SLASHES),
-        ]));
-
-        return Finding::query()->updateOrCreate(
-            [
-                'website_id' => $website->id,
-                'fingerprint_hash' => $fingerprint,
-            ],
-            [
-                'scan_id' => null,
-                'asset_discovery_id' => $discovery->id,
-                'raw_artifact_id' => null,
-                'title' => $data['title'],
-                'severity' => $data['severity'],
-                'confidence' => 0.8,
-                'affected_url' => $website->url,
-                'source_tool' => 'scanforge-passive-discovery',
-                'evidence' => $data['evidence'],
-                'remediation' => $data['remediation'],
-                'status' => 'open',
-                'metadata' => $data['metadata'],
-            ]
-        );
+        return $this->findingNormalizationService->persistPassiveFinding($website, $discovery, $data);
     }
 }

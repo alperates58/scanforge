@@ -32,6 +32,10 @@ import {
   AssetSummary,
   AuthPayload,
   DashboardSummary,
+  FindingDetail,
+  FindingFilters,
+  FindingListItem,
+  FindingSummary,
   HealthStatus,
   ScanRecord,
   ScanPlan,
@@ -47,6 +51,9 @@ import {
   fetchAssetSummary,
   fetchDashboardSummary,
   fetchDiscoveries,
+  fetchFinding,
+  fetchFindingSummary,
+  fetchFindings,
   fetchHealth,
   fetchScan,
   fetchScanPlans,
@@ -66,6 +73,7 @@ import {
   runDiscovery,
   startScan,
   storeToken,
+  updateFindingStatus,
 } from './lib/api';
 
 const navigation = [
@@ -113,6 +121,8 @@ const fallbackSummary: DashboardSummary = {
     failed_jobs: 0,
     avg_job_time: 0,
   },
+  scanner_versions: [],
+  scanner_metrics: [],
 };
 
 export function App() {
@@ -375,9 +385,9 @@ function DashboardPage() {
 
   const scoreLabel = useMemo(() => {
     if (summary.risk.average_score === 0 && summary.totals.scans === 0) return 'Awaiting first scan';
-    if (summary.risk.average_score >= 85) return 'Strong posture';
-    if (summary.risk.average_score >= 65) return 'Watchlist';
-    return 'Needs attention';
+    if (summary.risk.average_score >= 70) return 'Needs attention';
+    if (summary.risk.average_score >= 40) return 'Watchlist';
+    return 'Controlled';
   }, [summary.risk.average_score, summary.totals.scans]);
 
   const dependencyState = health?.status === 'ok' ? 'Operational' : health ? 'Degraded' : 'Checking';
@@ -388,8 +398,8 @@ function DashboardPage() {
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard icon={Globe2} label="Total Websites" value={summary.totals.websites.toString()} detail={`${summary.totals.verified_websites} verified`} />
-        <MetricCard icon={Gauge} label="Average Security Score" value={summary.totals.scans === 0 ? '--' : summary.risk.average_score.toString()} detail={scoreLabel} />
-        <MetricCard icon={AlertTriangle} label="Passive Findings" value={(summary.totals.passive_findings ?? 0).toString()} detail={`${summary.risk.critical_findings} critical findings`} />
+        <MetricCard icon={Gauge} label="Average Finding Risk" value={summary.totals.open_findings === 0 ? '--' : summary.risk.average_score.toString()} detail={scoreLabel} />
+        <MetricCard icon={AlertTriangle} label="Open Findings" value={summary.totals.open_findings.toString()} detail={`${summary.risk.critical_findings} critical, ${summary.risk.high_findings} high`} />
         <MetricCard icon={Activity} label="Last Discovery" value={summary.activity.latest_discovery_status ?? '--'} detail={summary.activity.last_discovery_at ? new Date(summary.activity.last_discovery_at).toLocaleString() : 'No discovery yet'} />
       </section>
 
@@ -430,8 +440,64 @@ function DashboardPage() {
             <SafetyRow label="Active workers" value={(summary.worker_metrics?.active_workers ?? 0).toString()} good />
             <SafetyRow label="Active jobs" value={(summary.worker_metrics?.active_jobs ?? 0).toString()} good />
             <SafetyRow label="Queued jobs" value={(summary.worker_metrics?.queued_jobs ?? 0).toString()} good />
+            <SafetyRow label="Scanner versions" value={(summary.scanner_versions?.length ?? 0).toString()} good />
+            <SafetyRow label="Scanner runs" value={(summary.scanner_metrics ?? []).reduce((total, metric) => total + metric.runs, 0).toString()} good />
             <SafetyRow label="Schema" value={summary.schema_ready ? 'Ready' : 'Awaiting migration'} good={summary.schema_ready} />
           </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Risk Rollup</h2>
+            <p>{summary.risk.top_risky_websites?.length ? `${summary.risk.top_risky_websites.length} websites ranked by finding risk` : 'No website risk yet'}</p>
+          </div>
+        </div>
+        <div className="table-list">
+          {(summary.risk.top_risky_websites ?? []).map((website) => (
+            <Link className="table-row" key={website.id} to={`/websites/${website.id}`}>
+              <div className="min-w-0">
+                <div className="truncate font-medium">{website.host}</div>
+                <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span>{website.critical_count} critical</span>
+                  <span>{website.high_count} high</span>
+                  <span>{website.trend}</span>
+                </div>
+              </div>
+              <RiskBadge score={Math.round(website.risk_score ?? 0)} priority={(website.risk_score ?? 0) >= 85 ? 'critical' : (website.risk_score ?? 0) >= 70 ? 'high' : 'medium'} />
+              <ChevronRight className="text-muted-foreground" size={18} />
+            </Link>
+          ))}
+          {summary.risk.top_risky_websites?.length === 0 ? <div className="px-4 py-4 text-sm text-muted-foreground">Findings will populate this rollup after scans or discovery.</div> : null}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Scanner Engines</h2>
+            <p>{summary.scanner_versions?.length ? `${summary.scanner_versions.length} tracked adapters` : 'No scanner runs recorded'}</p>
+          </div>
+        </div>
+        <div className="table-list">
+          {(summary.scanner_versions ?? []).map((version) => {
+            const metric = summary.scanner_metrics?.find((item) => item.scanner_key === version.scanner_key);
+
+            return (
+              <div className="table-row" key={version.scanner_key}>
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{version.scanner_key}</div>
+                  <div className="mt-1 truncate text-xs text-muted-foreground">
+                    {version.binary_version ?? 'binary unknown'} / {version.templates_version ?? 'templates unknown'}
+                  </div>
+                </div>
+                <StatusBadge status={version.status} />
+                <span className="text-xs text-muted-foreground">{metric ? `${metric.success}/${metric.runs} ok` : 'No runs'}</span>
+              </div>
+            );
+          })}
+          {summary.scanner_versions?.length === 0 ? <div className="px-4 py-4 text-sm text-muted-foreground">Scanner versions appear after the first adapter check.</div> : null}
         </div>
       </section>
     </>
@@ -506,6 +572,11 @@ function WebsiteDetailPage() {
   const [scanPlans, setScanPlans] = useState<ScanPlan[]>([]);
   const [scans, setScans] = useState<ScanRecord[]>([]);
   const [discoveries, setDiscoveries] = useState<AssetDiscovery[]>([]);
+  const [findings, setFindings] = useState<FindingListItem[]>([]);
+  const [findingSummary, setFindingSummary] = useState<FindingSummary | null>(null);
+  const [findingFilters, setFindingFilters] = useState<FindingFilters>({});
+  const [selectedFinding, setSelectedFinding] = useState<FindingDetail | null>(null);
+  const [findingActionId, setFindingActionId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [fingerprinting, setFingerprinting] = useState(false);
@@ -518,6 +589,21 @@ function WebsiteDetailPage() {
   const [selectedScanPlanId, setSelectedScanPlanId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  async function refreshFindings(filters = findingFilters) {
+    if (!id) return;
+
+    try {
+      const [findingList, findingSummaryData] = await Promise.all([
+        fetchFindings(id, filters),
+        fetchFindingSummary(id),
+      ]);
+      setFindings(findingList.data);
+      setFindingSummary(findingSummaryData);
+    } catch (apiError) {
+      setError(readError(apiError));
+    }
+  }
 
   async function load() {
     if (!id) return;
@@ -544,6 +630,7 @@ function WebsiteDetailPage() {
       setScanPlans(planData);
       setScans(scansForState);
       setSelectedScanPlanId((current) => current ?? planData[0]?.id ?? null);
+      await refreshFindings();
     } catch (apiError) {
       setError(readError(apiError));
     } finally {
@@ -554,6 +641,10 @@ function WebsiteDetailPage() {
   useEffect(() => {
     load();
   }, [id]);
+
+  useEffect(() => {
+    refreshFindings();
+  }, [id, findingFilters.severity, findingFilters.priority, findingFilters.status, findingFilters.scanner_key, findingFilters.cve, findingFilters.search]);
 
   async function handleRunDiscovery() {
     if (!id) return;
@@ -683,6 +774,41 @@ function WebsiteDetailPage() {
     }
   }
 
+  async function handleSelectFinding(findingId: number) {
+    if (!id) return;
+
+    setError(null);
+
+    try {
+      setSelectedFinding(await fetchFinding(id, findingId));
+    } catch (apiError) {
+      setError(readError(apiError));
+    }
+  }
+
+  async function handleFindingStatus(status: string, createRule = false) {
+    if (!id || !selectedFinding) return;
+
+    setFindingActionId(selectedFinding.id);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const updated = await updateFindingStatus(id, selectedFinding.id, {
+        status,
+        create_rule: createRule,
+        reason: createRule ? `Marked ${status} and saved as a suppression rule.` : `Marked ${status} from the findings panel.`,
+      });
+      setSelectedFinding(updated);
+      setMessage(`Finding ${updated.status}`);
+      await refreshFindings();
+    } catch (apiError) {
+      setError(readError(apiError));
+    } finally {
+      setFindingActionId(null);
+    }
+  }
+
   const verified = website?.verification_status === 'verified';
   const latestScan = scans[0];
   const activeScan = scans.find((scan) => !['completed', 'cancelled', 'failed', 'timeout'].includes(scan.status));
@@ -732,6 +858,14 @@ function WebsiteDetailPage() {
           <MetricCard icon={AlertTriangle} label="Passive Findings" value={(summary?.passive_findings.length ?? 0).toString()} detail={`${technologySummary?.conflicts.length ?? 0} conflicts`} />
         </div>
       </div>
+
+      <FindingsPanel
+        findings={findings}
+        summary={findingSummary}
+        filters={findingFilters}
+        onFiltersChange={setFindingFilters}
+        onSelect={handleSelectFinding}
+      />
 
       <div className="grid gap-4 xl:grid-cols-4">
         <AssetCard title="DNS" value={formatRecordCounts(summary?.dns_record_counts)} />
@@ -935,13 +1069,34 @@ function WebsiteDetailPage() {
                     <div className="table-row" key={job.id}>
                       <div className="min-w-0">
                         <div className="truncate font-medium">{job.scanner_key ?? 'mock'} / {job.scan_module ?? 'mock'}</div>
-                        <div className="mt-1 truncate text-xs text-muted-foreground">{job.plan_item?.technology_key ?? job.queue_name} - {job.progress_percent}%</div>
+                        <div className="mt-1 truncate text-xs text-muted-foreground">{job.template_group ?? job.plan_item?.technology_key ?? job.queue_name} - {job.progress_percent}%</div>
                       </div>
                       <StatusBadge status={job.status} />
                       <span className="text-xs text-muted-foreground">{job.request_count} req</span>
                     </div>
                   ))}
                   {latestScan.jobs?.length === 0 ? <div className="px-4 py-4 text-sm text-muted-foreground">No jobs queued.</div> : null}
+                </div>
+                <div className="space-y-2">
+                  <div className="text-xs font-medium uppercase text-muted-foreground">Findings</div>
+                  {latestScan.recent_findings.length ? (
+                    latestScan.recent_findings.map((finding) => (
+                      <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-3" key={finding.id}>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-medium">{finding.title}</div>
+                          <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                            <span>{finding.scanner_key ?? 'scanner'}</span>
+                            {finding.template_id ? <span>{finding.template_id}</span> : null}
+                            <span className="truncate">{finding.affected_url}</span>
+                          </div>
+                        </div>
+                        <StatusBadge status={finding.severity} />
+                        {finding.has_raw_evidence ? <span className="status-badge status-good">Raw evidence available</span> : null}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-lg border border-border bg-background px-3 py-4 text-sm text-muted-foreground">No findings reported for this scan.</div>
+                  )}
                 </div>
               </>
             ) : (
@@ -1011,7 +1166,216 @@ function WebsiteDetailPage() {
           </div>
         </div>
       ) : null}
+
+      {selectedFinding ? (
+        <FindingDrawer
+          finding={selectedFinding}
+          busy={findingActionId === selectedFinding.id}
+          onClose={() => setSelectedFinding(null)}
+          onStatus={handleFindingStatus}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function FindingsPanel({
+  findings,
+  summary,
+  filters,
+  onFiltersChange,
+  onSelect,
+}: {
+  findings: FindingListItem[];
+  summary: FindingSummary | null;
+  filters: FindingFilters;
+  onFiltersChange: React.Dispatch<React.SetStateAction<FindingFilters>>;
+  onSelect: (findingId: number) => void;
+}) {
+  return (
+    <div className="panel">
+      <div className="panel-heading">
+        <div>
+          <h2>Findings</h2>
+          <p>{summary ? `${summary.open} open, average risk ${summary.average_risk_score}` : 'Loading normalized findings'}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {Object.entries(summary?.severity ?? {}).map(([severity, count]) => (
+            <span className="status-badge status-pending" key={severity}>{severity} {count}</span>
+          ))}
+        </div>
+      </div>
+
+      <div className="mb-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <label className="form-field xl:col-span-2">
+          <span>Search</span>
+          <input value={filters.search ?? ''} onChange={(event) => onFiltersChange((current) => ({ ...current, search: event.target.value || undefined }))} />
+        </label>
+        <FilterSelect label="Severity" value={filters.severity} values={['critical', 'high', 'medium', 'low', 'info']} onChange={(value) => onFiltersChange((current) => ({ ...current, severity: value }))} />
+        <FilterSelect label="Priority" value={filters.priority} values={['critical', 'high', 'medium', 'low', 'info']} onChange={(value) => onFiltersChange((current) => ({ ...current, priority: value }))} />
+        <FilterSelect label="Status" value={filters.status} values={['new', 'confirmed', 'reopened', 'ignored', 'resolved', 'false_positive']} onChange={(value) => onFiltersChange((current) => ({ ...current, status: value }))} />
+        <label className="form-field">
+          <span>CVE</span>
+          <input value={filters.cve ?? ''} onChange={(event) => onFiltersChange((current) => ({ ...current, cve: event.target.value || undefined }))} />
+        </label>
+      </div>
+
+      <div className="table-list">
+        {findings.length ? (
+          findings.map((finding) => (
+            <button className="table-row text-left" key={finding.id} onClick={() => onSelect(finding.id)}>
+              <div className="min-w-0">
+                <div className="truncate font-medium">{finding.title}</div>
+                <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span>{finding.taxonomy?.category ?? 'Unclassified'}</span>
+                  <span>{finding.asset_type ?? 'asset'}: {finding.asset_identifier ?? finding.affected_component ?? finding.affected_url}</span>
+                  <span>{finding.occurrence_count} occurrences</span>
+                  <span>correlation {finding.correlation_score}</span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {finding.sources.slice(0, 4).map((source, index) => (
+                    <span className="status-badge status-pending" key={`${source.scanner_key}-${index}`}>{source.scanner_key}</span>
+                  ))}
+                </div>
+              </div>
+              <RiskBadge score={finding.risk_score} priority={finding.priority} />
+              <StatusBadge status={finding.status} />
+            </button>
+          ))
+        ) : (
+          <div className="px-4 py-4 text-sm text-muted-foreground">No findings match the current filters.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FilterSelect({ label, value, values, onChange }: { label: string; value?: string; values: string[]; onChange: (value: string | undefined) => void }) {
+  return (
+    <label className="form-field">
+      <span>{label}</span>
+      <select value={value ?? ''} onChange={(event) => onChange(event.target.value || undefined)}>
+        <option value="">All</option>
+        {values.map((item) => (
+          <option value={item} key={item}>{item}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function FindingDrawer({ finding, busy, onClose, onStatus }: { finding: FindingDetail; busy: boolean; onClose: () => void; onStatus: (status: string, createRule?: boolean) => void }) {
+  return (
+    <div className="fixed inset-y-0 right-0 z-20 w-full max-w-2xl overflow-y-auto border-l border-border bg-surface p-5 shadow-soft">
+      <div className="mb-5 flex items-start justify-between gap-4 border-b border-border pb-4">
+        <div className="min-w-0">
+          <h2 className="truncate text-base font-semibold">{finding.title}</h2>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <RiskBadge score={finding.risk_score} priority={finding.priority} />
+            <StatusBadge status={finding.status} />
+            <span className="status-badge status-pending">confidence {finding.confidence_score}</span>
+          </div>
+        </div>
+        <button className="icon-button" onClick={onClose} aria-label="Close finding detail">
+          <XCircle size={17} />
+        </button>
+      </div>
+
+      <div className="space-y-5">
+        <section>
+          <div className="text-xs font-medium uppercase text-muted-foreground">Taxonomy</div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <span className="status-badge status-pending">{finding.taxonomy?.category ?? 'Unclassified'}</span>
+            {finding.taxonomy?.subcategory ? <span className="status-badge status-pending">{finding.taxonomy.subcategory}</span> : null}
+            {finding.taxonomy?.owasp_category ? <span className="status-badge status-pending">{finding.taxonomy.owasp_category}</span> : null}
+            {finding.taxonomy?.cwe ? <span className="status-badge status-pending">{finding.taxonomy.cwe}</span> : null}
+            {finding.taxonomy?.capec ? <span className="status-badge status-pending">{finding.taxonomy.capec}</span> : null}
+          </div>
+        </section>
+
+        <section className="grid gap-3 sm:grid-cols-2">
+          <SafetyRow label="Asset" value={finding.asset_identifier ?? finding.affected_url} good />
+          <SafetyRow label="Sources" value={finding.sources.map((source) => source.scanner_key).join(', ') || finding.scanner_key || 'unknown'} good />
+          <SafetyRow label="Occurrences" value={finding.occurrence_count.toString()} good />
+          <SafetyRow label="SLA" value={finding.sla_due_at ? new Date(finding.sla_due_at).toLocaleDateString() : 'None'} good={finding.priority === 'info' || finding.priority === 'low'} />
+        </section>
+
+        {finding.description ? (
+          <section>
+            <div className="text-xs font-medium uppercase text-muted-foreground">Description</div>
+            <p className="mt-2 text-sm leading-6">{finding.description}</p>
+          </section>
+        ) : null}
+
+        <section>
+          <div className="text-xs font-medium uppercase text-muted-foreground">Evidence</div>
+          <div className="mt-2 space-y-2">
+            {finding.evidences.length ? (
+              finding.evidences.map((evidence) => (
+                <code className="block whitespace-pre-wrap rounded-md border border-border bg-background p-3 text-xs" key={evidence.id}>{evidence.preview ?? evidence.sha256}</code>
+              ))
+            ) : (
+              <code className="block whitespace-pre-wrap rounded-md border border-border bg-background p-3 text-xs">{finding.evidence_text ?? 'No evidence preview.'}</code>
+            )}
+          </div>
+        </section>
+
+        {finding.remediation ? (
+          <section>
+            <div className="text-xs font-medium uppercase text-muted-foreground">Remediation</div>
+            <p className="mt-2 text-sm leading-6">{finding.remediation}</p>
+          </section>
+        ) : null}
+
+        {finding.references.length ? (
+          <section>
+            <div className="text-xs font-medium uppercase text-muted-foreground">References</div>
+            <div className="mt-2 space-y-2">
+              {finding.references.map((reference) => (
+                <a className="block break-words text-sm text-primary" href={reference} key={reference} target="_blank" rel="noreferrer">{reference}</a>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section>
+          <div className="text-xs font-medium uppercase text-muted-foreground">Actions</div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button className="primary-button" disabled={busy} onClick={() => onStatus('confirmed')}>
+              <CheckCircle2 size={16} />
+              <span>Confirm</span>
+            </button>
+            <button className="primary-button" disabled={busy} onClick={() => onStatus('resolved')}>
+              <CheckCircle2 size={16} />
+              <span>Resolve</span>
+            </button>
+            <button className="primary-button" disabled={busy} onClick={() => onStatus('ignored', true)}>
+              <ShieldEllipsis size={16} />
+              <span>Ignore Rule</span>
+            </button>
+            <button className="primary-button" disabled={busy} onClick={() => onStatus('false_positive', true)}>
+              <XCircle size={16} />
+              <span>False Positive</span>
+            </button>
+            <button className="primary-button" disabled={busy} onClick={() => onStatus('reopened')}>
+              <RotateCcw size={16} />
+              <span>Reopen</span>
+            </button>
+          </div>
+        </section>
+
+        <section>
+          <div className="text-xs font-medium uppercase text-muted-foreground">History</div>
+          <div className="mt-2 space-y-2">
+            {finding.events.slice(0, 6).map((event, index) => (
+              <div className="rounded-lg border border-border bg-background px-3 py-2 text-xs" key={`${event.changed_at}-${index}`}>
+                {event.old_status ?? 'none'} {'->'} {event.new_status} {event.changed_at ? `at ${new Date(event.changed_at).toLocaleString()}` : ''}
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+    </div>
   );
 }
 
@@ -1335,6 +1699,16 @@ function StatusBadge({ status }: { status: string }) {
       : 'status-badge status-pending';
 
   return <span className={className}>{status}</span>;
+}
+
+function RiskBadge({ score, priority }: { score: number; priority: string }) {
+  const className = ['critical', 'high'].includes(priority)
+    ? 'status-badge status-danger'
+    : priority === 'medium'
+      ? 'status-badge status-pending'
+      : 'status-badge status-good';
+
+  return <span className={className}>{score} {priority}</span>;
 }
 
 function CodeLine({ label, value }: { label: string; value: string }) {

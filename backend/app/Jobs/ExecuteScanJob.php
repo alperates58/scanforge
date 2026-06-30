@@ -2,7 +2,7 @@
 
 namespace App\Jobs;
 
-use App\Services\MockExecutorService;
+use App\Services\ScannerExecutorService;
 use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -24,13 +24,13 @@ class ExecuteScanJob implements ShouldQueue
     {
     }
 
-    public function handle(MockExecutorService $mockExecutorService): void
+    public function handle(ScannerExecutorService $scannerExecutorService): void
     {
         if ($this->batch()?->cancelled()) {
             return;
         }
 
-        $mockExecutorService->execute($this->scanJobId);
+        $scannerExecutorService->execute($this->scanJobId);
     }
 
     public function backoff(): int

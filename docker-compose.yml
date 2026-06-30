@@ -8,7 +8,7 @@ x-backend-environment: &backend-environment
   APP_URL: ${APP_URL:-http://localhost:8000}
   FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3003}
   CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3003}
-  SCANFORGE_VERSION: ${SCANFORGE_VERSION:-0.5.0-phase05}
+  SCANFORGE_VERSION: ${SCANFORGE_VERSION:-0.7.0-phase07}
   SANCTUM_STATEFUL_DOMAINS: ${SANCTUM_STATEFUL_DOMAINS:-localhost:3003,127.0.0.1:3003,localhost:8000,127.0.0.1:8000}
   LOG_CHANNEL: ${LOG_CHANNEL:-stack}
   LOG_LEVEL: ${LOG_LEVEL:-debug}
@@ -42,6 +42,18 @@ x-backend-environment: &backend-environment
   SCANFORGE_JOB_MAX_RUNTIME: ${SCANFORGE_JOB_MAX_RUNTIME:-300}
   SCANFORGE_JOB_MAX_MEMORY_MB: ${SCANFORGE_JOB_MAX_MEMORY_MB:-256}
   SCANNER_MOCK_WORKER_ENABLED: ${SCANNER_MOCK_WORKER_ENABLED:-true}
+  NUCLEI_ENABLED: ${NUCLEI_ENABLED:-false}
+  NUCLEI_VERSION: ${NUCLEI_VERSION:-3.10.0}
+  NUCLEI_BINARY_PATH: ${NUCLEI_BINARY_PATH:-/usr/local/bin/nuclei}
+  NUCLEI_TEMPLATES_PATH: ${NUCLEI_TEMPLATES_PATH:-/opt/nuclei-templates}
+  NUCLEI_DEFAULT_TIMEOUT_SECONDS: ${NUCLEI_DEFAULT_TIMEOUT_SECONDS:-300}
+  NUCLEI_MAX_REQUESTS: ${NUCLEI_MAX_REQUESTS:-100}
+  NUCLEI_RATE_LIMIT_PER_SECOND: ${NUCLEI_RATE_LIMIT_PER_SECOND:-2}
+  NUCLEI_ALLOWED_SEVERITIES: ${NUCLEI_ALLOWED_SEVERITIES:-info,low,medium,high,critical}
+  NUCLEI_SAFE_TEMPLATE_TAGS: ${NUCLEI_SAFE_TEMPLATE_TAGS:-exposure,misconfig,headers,ssl,tech,cve,config}
+  NUCLEI_BLOCKED_TEMPLATE_TAGS: ${NUCLEI_BLOCKED_TEMPLATE_TAGS:-dos,fuzz,fuzzing,brute-force,bruteforce,intrusive,destructive,aggressive,dast}
+  NUCLEI_INTEGRATION_TEST: ${NUCLEI_INTEGRATION_TEST:-false}
+  SCANFORGE_SCANNER_TMP: ${SCANFORGE_SCANNER_TMP:-/tmp/scanforge}
   DOMAIN_VERIFICATION_TIMEOUT_SECONDS: ${DOMAIN_VERIFICATION_TIMEOUT_SECONDS:-5}
   DOMAIN_VERIFICATION_MAX_REDIRECTS: ${DOMAIN_VERIFICATION_MAX_REDIRECTS:-3}
   DISCOVERY_TIMEOUT_SECONDS: ${DISCOVERY_TIMEOUT_SECONDS:-5}
@@ -55,6 +67,8 @@ services:
   backend:
     build:
       context: ./backend
+      args:
+        NUCLEI_VERSION: ${NUCLEI_VERSION:-3.10.0}
     environment:
       <<: *backend-environment
     ports:
@@ -68,6 +82,8 @@ services:
   queue:
     build:
       context: ./backend
+      args:
+        NUCLEI_VERSION: ${NUCLEI_VERSION:-3.10.0}
     command: ["php", "artisan", "queue:work", "redis", "--queue=scan-high,scan-normal,scan-low,maintenance,ai,notification,default", "--sleep=3", "--tries=2", "--timeout=900"]
     environment:
       <<: *backend-environment

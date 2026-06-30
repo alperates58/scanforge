@@ -24,6 +24,7 @@ ScanForge sadece kullanicinin sahip oldugu veya yazili yetki aldigi domainlerde 
 - Concurrent scan limiti workspace basina dusuk tutulur.
 - Same target cooldown standard/deep scan icin uygulanir.
 - External command'lar icin timeout ve resource limit zorunludur.
+- Nuclei varsayilan kapali: `NUCLEI_ENABLED=false`.
 
 ## Audit Points
 
@@ -96,6 +97,29 @@ HTTP verification kisa timeout, sinirli redirect ve same-host kuralini kullanir.
 - Worker heartbeat sadece registry/metrics icindir; hedef secme veya execution izni vermez.
 - `ScannerInterface` Phase 06 adapter sozlesmesidir; Phase 05 gercek adapter implementasyonu eklemez.
 
+## Phase 06 Nuclei Guards
+
+- Nuclei sadece existing scan endpointleri ve orchestrator uzerinden calisir; ayri "run nuclei" endpoint'i yoktur.
+- Adapter orchestrator tarafindan dogrudan instantiate edilmez. `scanner_key -> ScannerRegistry -> ScannerInterface` akisi zorunludur.
+- Verified website, consent, scan plan item ve public target host olmadan Nuclei process baslatilmaz.
+- Template policy allowlist zorunludur. Unknown group, DoS, fuzzing, brute-force, intrusive, destructive ve aggressive exploit gruplari blocked defaulttur.
+- Safe ilk gruplar: exposures, misconfig, headers, ssl, technologies ve safe CVE/config kontrolleri.
+- Deep/intensive policy `SCANFORGE_ENABLE_DEEP_SCAN=false` iken blocked kalir.
+- Process Symfony Process ile array arguman olarak calisir; shell string kullanilmaz.
+- Her job icin `/tmp/scanforge/{job_uuid}/` altinda isolated `work`, `tmp`, `output` dizinleri olusturulur ve run bitince temizlenir.
+- Nuclei `-restrict-local-network-access`, `-no-interactsh`, `-omit-raw`, `-omit-template`, blocked tags ve rate limit ile calistirilir.
+- Raw evidence JSONL olarak saklanir; request/response raw body ve secret-bearing header loglanmaz.
+- Finding dedupe duplicate satir acmayi engeller; tekrar gorulen finding `last_seen_at` ve `occurrence_count` ile guncellenir.
+
+## Phase 07 Finding Engine Guards
+
+- Phase 07 yeni scanner motoru eklemez; sadece Finding Engine veri isleme katmanini genisletir.
+- Scanner adapter'lari finding status, risk veya suppression karari vermez; bu kararlar backend servislerinde merkezi olarak uygulanir.
+- `finding_sources.source_payload` ve `finding_evidences.preview` secret-bearing keyleri redakte eder.
+- Ignore ve false-positive suppression rules scanner/template/host ile sinirlanir ve opsiyonel expiry tasir.
+- Workspace isolation findings API, source/evidence/history kayitlari ve dashboard rollup sorgularinda zorunludur.
+- AI hazirlik alanlari (`analysis_version`, `analysis_required`, `analysis_status`) sadece queue sinyali uretir; Phase 07 AI cagrisi yapmaz.
+
 ## Phase Links
 
 - Phase 01 security gate servis iskeletini koyar.
@@ -103,4 +127,6 @@ HTTP verification kisa timeout, sinirli redirect ve same-host kuralini kullanir.
 - Phase 03 verified asset discovery ve passive recon modelini ekler.
 - Phase 04 plugin tabanli technology fingerprint, immutable evidence, graph ve safe scan plan tahmini ekler.
 - Phase 05 scan orchestrator, queue, worker registry, mock executor, timeline/log, retry ve cancellation altyapisini ekler.
+- Phase 06 Nuclei adapter, scanner registry, template policy, sandbox, artifact manifest, dedupe, finding history ve scanner metrics/version altyapisini ekler.
+- Phase 07 Finding Engine, taxonomy, canonical library, correlation score, risk history, evidence attachments, suppression rules, confidence history, website risk rollup ve scan delta altyapisini ekler.
 - Phase 12 audit review ve hardening kontrollerini genisletir.

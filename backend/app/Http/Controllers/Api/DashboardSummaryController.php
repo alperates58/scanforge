@@ -6,9 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Models\AssetDiscovery;
 use App\Models\Finding;
 use App\Models\Scan;
+use App\Models\ScannerMetric;
+use App\Models\ScannerVersion;
 use App\Models\Website;
 use App\Services\ScanMetricsService;
 use App\Services\WorkspaceContext;
+use App\Support\FindingStatuses;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -32,8 +35,10 @@ class DashboardSummaryController extends Controller
         };
 
         $websiteIds = fn () => Website::query()->where('workspace_id', $workspace->id)->select('id');
-        $criticalFindings = $metric(fn () => Finding::query()->whereIn('website_id', $websiteIds())->where('severity', 'critical')->where('status', 'open')->count());
-        $highFindings = $metric(fn () => Finding::query()->whereIn('website_id', $websiteIds())->where('severity', 'high')->where('status', 'open')->count());
+        $activeStatuses = FindingStatuses::active();
+        $criticalFindings = $metric(fn () => Finding::query()->whereIn('website_id', $websiteIds())->where('severity', 'critical')->whereIn('status', $activeStatuses)->count());
+        $highFindings = $metric(fn () => Finding::query()->whereIn('website_id', $websiteIds())->where('severity', 'high')->whereIn('status', $activeStatuses)->count());
+        $averageFindingRisk = $metric(fn () => round((float) (Finding::query()->whereIn('website_id', $websiteIds())->whereIn('status', $activeStatuses)->avg('risk_score') ?? 0), 1));
         $latestScanStatus = null;
 
         try {
@@ -59,14 +64,21 @@ class DashboardSummaryController extends Controller
                 'websites' => $metric(fn () => Website::query()->where('workspace_id', $workspace->id)->count()),
                 'verified_websites' => $metric(fn () => Website::query()->where('workspace_id', $workspace->id)->where('verification_status', 'verified')->count()),
                 'scans' => $metric(fn () => Scan::query()->whereIn('website_id', $websiteIds())->count()),
-                'open_findings' => $metric(fn () => Finding::query()->whereIn('website_id', $websiteIds())->where('status', 'open')->count()),
-                'passive_findings' => $metric(fn () => Finding::query()->whereIn('website_id', $websiteIds())->where('source_tool', 'scanforge-passive-discovery')->where('status', 'open')->count()),
+                'open_findings' => $metric(fn () => Finding::query()->whereIn('website_id', $websiteIds())->whereIn('status', $activeStatuses)->count()),
+                'passive_findings' => $metric(fn () => Finding::query()->whereIn('website_id', $websiteIds())->where('source_tool', 'scanforge-passive-discovery')->whereIn('status', $activeStatuses)->count()),
+                'resolved_findings' => $metric(fn () => Finding::query()->whereIn('website_id', $websiteIds())->where('status', FindingStatuses::RESOLVED)->count()),
+                'false_positive_findings' => $metric(fn () => Finding::query()->whereIn('website_id', $websiteIds())->where('status', FindingStatuses::FALSE_POSITIVE)->count()),
                 'discoveries' => $metric(fn () => AssetDiscovery::query()->whereIn('website_id', $websiteIds())->count()),
             ],
             'risk' => [
-                'average_score' => $metric(fn () => round((float) (Scan::query()->whereIn('website_id', $websiteIds())->whereNotNull('score')->avg('score') ?? 0), 1)),
+                'average_score' => $averageFindingRisk,
+                'average_finding_risk_score' => $averageFindingRisk,
+                'average_scan_score' => $metric(fn () => round((float) (Scan::query()->whereIn('website_id', $websiteIds())->whereNotNull('score')->avg('score') ?? 0), 1)),
                 'critical_findings' => $criticalFindings,
                 'high_findings' => $highFindings,
+                'resolved_findings' => $metric(fn () => Finding::query()->whereIn('website_id', $websiteIds())->where('status', FindingStatuses::RESOLVED)->count()),
+                'false_positive_findings' => $metric(fn () => Finding::query()->whereIn('website_id', $websiteIds())->where('status', FindingStatuses::FALSE_POSITIVE)->count()),
+                'top_risky_websites' => $this->topRiskyWebsites($workspace->id, $metric),
             ],
             'activity' => [
                 'scans_this_week' => $metric(fn () => Scan::query()->whereIn('website_id', $websiteIds())->where('created_at', '>=', Carbon::now()->subWeek())->count()),
@@ -86,6 +98,92 @@ class DashboardSummaryController extends Controller
                 'scans_used_this_month' => $workspace->scans_used_this_month,
             ],
             'worker_metrics' => $scanMetricsService->workspaceMetrics($workspace->id),
+            'scanner_versions' => $this->scannerVersions($metric),
+            'scanner_metrics' => $this->scannerMetrics($metric),
         ]);
+    }
+
+    /**
+     * @param callable(callable): (int|float) $metric
+     * @return list<array<string, mixed>>
+     */
+    private function scannerVersions(callable $metric): array
+    {
+        $metric(fn () => ScannerVersion::query()->count());
+
+        try {
+            return ScannerVersion::query()
+                ->orderBy('scanner_key')
+                ->get()
+                ->map(fn (ScannerVersion $version): array => [
+                    'scanner_key' => $version->scanner_key,
+                    'binary_version' => $version->binary_version,
+                    'templates_version' => $version->templates_version,
+                    'last_checked_at' => $version->last_checked_at?->toISOString(),
+                    'status' => $version->status,
+                ])
+                ->values()
+                ->all();
+        } catch (QueryException) {
+            return [];
+        }
+    }
+
+    /**
+     * @param callable(callable): (int|float) $metric
+     * @return list<array<string, mixed>>
+     */
+    private function scannerMetrics(callable $metric): array
+    {
+        $metric(fn () => ScannerMetric::query()->count());
+
+        try {
+            return ScannerMetric::query()
+                ->orderBy('scanner_key')
+                ->get()
+                ->map(fn (ScannerMetric $scannerMetric): array => [
+                    'scanner_key' => $scannerMetric->scanner_key,
+                    'runs' => $scannerMetric->runs,
+                    'success' => $scannerMetric->success,
+                    'failed' => $scannerMetric->failed,
+                    'timeout' => $scannerMetric->timeout,
+                    'avg_runtime' => $scannerMetric->avg_runtime,
+                    'avg_findings' => $scannerMetric->avg_findings,
+                    'last_run_at' => $scannerMetric->last_run_at?->toISOString(),
+                ])
+                ->values()
+                ->all();
+        } catch (QueryException) {
+            return [];
+        }
+    }
+
+    /**
+     * @param callable(callable): (int|float) $metric
+     * @return list<array<string, mixed>>
+     */
+    private function topRiskyWebsites(int $workspaceId, callable $metric): array
+    {
+        $metric(fn () => Website::query()->where('workspace_id', $workspaceId)->count());
+
+        try {
+            return Website::query()
+                ->where('workspace_id', $workspaceId)
+                ->orderByDesc('risk_score')
+                ->limit(5)
+                ->get()
+                ->map(fn (Website $website): array => [
+                    'id' => $website->id,
+                    'host' => $website->host,
+                    'risk_score' => $website->risk_score,
+                    'critical_count' => $website->critical_count,
+                    'high_count' => $website->high_count,
+                    'trend' => $website->risk_trend,
+                ])
+                ->values()
+                ->all();
+        } catch (QueryException) {
+            return [];
+        }
     }
 }

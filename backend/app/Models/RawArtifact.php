@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class RawArtifact extends Model
 {
@@ -44,5 +45,13 @@ class RawArtifact extends Model
     public function scanJob(): BelongsTo
     {
         return $this->belongsTo(ScanJob::class);
+    }
+
+    /**
+     * @return HasOne<ArtifactManifest, $this>
+     */
+    public function artifactManifest(): HasOne
+    {
+        return $this->hasOne(ArtifactManifest::class);
     }
 }

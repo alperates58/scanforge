@@ -34,6 +34,7 @@ class ScanOrchestratorService
         private readonly AuditLogService $auditLogService,
         private readonly ScanJobLifecycleService $scanJobLifecycleService,
         private readonly ScanProgressService $scanProgressService,
+        private readonly WorkerRegistryService $workerRegistryService,
     ) {
     }
 
@@ -126,8 +127,8 @@ class ScanOrchestratorService
                     'consent_accepted_at' => $now,
                     'requested_by_user_id' => $user->id,
                     'request_options' => [
-                        'phase' => 'phase05',
-                        'mock_only' => true,
+                        'phase' => 'phase06',
+                        'mock_fallback_enabled' => (bool) config('scanners.fallback_to_mock', true),
                         'options' => $payload['options'] ?? [],
                     ],
                     'request_budget' => $requestBudget,
@@ -135,8 +136,8 @@ class ScanOrchestratorService
                     'progress_percent' => 0,
                     'total_jobs' => $itemCount,
                     'metadata' => [
-                        'phase' => 'phase05',
-                        'mock_only' => true,
+                        'phase' => 'phase06',
+                        'mock_fallback_enabled' => (bool) config('scanners.fallback_to_mock', true),
                         'lock_key' => $lockKey,
                         'lock_owner' => $lock->owner(),
                         'credential_id' => $credentialId,
@@ -159,7 +160,7 @@ class ScanOrchestratorService
                         'scan_type' => $scanType,
                         'safety_mode' => $safetyMode,
                         'total_jobs' => $itemCount,
-                        'mock_only' => true,
+                        'mock_fallback_enabled' => (bool) config('scanners.fallback_to_mock', true),
                     ],
                 );
 
@@ -373,7 +374,8 @@ class ScanOrchestratorService
                         'website_id' => $website->id,
                         'scan_id' => $scan->id,
                         'scan_plan_item_id' => $item->id,
-                        'job_type' => 'mock_scan',
+                        'job_uuid' => (string) str()->uuid(),
+                        'job_type' => ((string) $item->scanner_key ?: 'scanner').'_scan',
                         'scanner_key' => $item->scanner_key,
                         'scan_module' => $item->scan_module,
                         'template_group' => $item->template_group,
@@ -394,7 +396,7 @@ class ScanOrchestratorService
                         'max_runtime' => max(1, (int) ($item->estimated_duration_seconds ?: config('scanforge.orchestration.default_job_max_runtime', 300))),
                         'max_memory' => max(64, (int) ($item->estimated_memory_mb ?: config('scanforge.orchestration.default_job_max_memory', 256))),
                         'cancellation_token' => (string) str()->uuid(),
-                        'logs' => json_encode(['Queued by Phase 05 mock orchestrator.']),
+                        'logs' => json_encode(['Queued by ScanForge scanner orchestrator.']),
                         'created_at' => $now,
                         'updated_at' => $now,
                     ];
@@ -466,9 +468,24 @@ class ScanOrchestratorService
             ->select(['id', 'queue_name'])
             ->orderBy('id')
             ->chunkById(250, function ($jobs) use ($scan): void {
-                $batchJobs = $jobs
-                    ->map(fn (ScanJob $scanJob): ExecuteScanJob => (new ExecuteScanJob($scanJob->id))->onQueue($scanJob->queue_name))
-                    ->all();
+                $batchJobs = [];
+
+                foreach ($jobs as $scanJob) {
+                    if (! $this->workerRegistryService->supports((string) $scanJob->scanner_key)) {
+                        $this->scanJobLifecycleService->transition($scanJob, ScanJobStatuses::SKIPPED, 'No worker supports this scanner key.', [
+                            'completed_at' => Carbon::now(),
+                            'finished_at' => Carbon::now(),
+                            'progress' => 100,
+                            'progress_percent' => 100,
+                        ], [
+                            'scanner_key' => $scanJob->scanner_key,
+                        ]);
+                        $this->scanProgressService->refresh($scan);
+                        continue;
+                    }
+
+                    $batchJobs[] = (new ExecuteScanJob($scanJob->id))->onQueue($scanJob->queue_name);
+                }
 
                 if ($batchJobs !== []) {
                     Bus::batch($batchJobs)
@@ -489,9 +506,24 @@ class ScanOrchestratorService
             ->select(['id', 'queue_name'])
             ->orderBy('id')
             ->chunkById(250, function ($jobs): void {
-                $batchJobs = $jobs
-                    ->map(fn (ScanJob $scanJob): ExecuteScanJob => (new ExecuteScanJob($scanJob->id))->onQueue($scanJob->queue_name))
-                    ->all();
+                $batchJobs = [];
+
+                foreach ($jobs as $scanJob) {
+                    if (! $this->workerRegistryService->supports((string) $scanJob->scanner_key)) {
+                        $this->scanJobLifecycleService->transition($scanJob, ScanJobStatuses::SKIPPED, 'No worker supports this scanner key.', [
+                            'completed_at' => Carbon::now(),
+                            'finished_at' => Carbon::now(),
+                            'progress' => 100,
+                            'progress_percent' => 100,
+                        ], [
+                            'scanner_key' => $scanJob->scanner_key,
+                        ]);
+                        $this->scanProgressService->refresh($scanJob->scan);
+                        continue;
+                    }
+
+                    $batchJobs[] = (new ExecuteScanJob($scanJob->id))->onQueue($scanJob->queue_name);
+                }
 
                 if ($batchJobs !== []) {
                     Bus::batch($batchJobs)
@@ -544,7 +576,7 @@ class ScanOrchestratorService
                 'coverage_prediction' => $scan->scanPlan->coverage_prediction,
                 'estimated_requests' => $scan->scanPlan->estimated_requests,
             ] : null,
-            'recent_findings' => [],
+            'recent_findings' => $this->recentFindings($scan),
             'artifacts_count' => RawArtifact::query()->where('scan_id', $scan->id)->count(),
             'created_at' => $scan->created_at?->toISOString(),
         ];
@@ -596,6 +628,35 @@ class ScanOrchestratorService
                     'technology_key' => $scanJob->scanPlanItem->technology_key,
                     'reason' => $scanJob->scanPlanItem->reason,
                 ] : null,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function recentFindings(Scan $scan): array
+    {
+        return $scan->findings()
+            ->latest('last_seen_at')
+            ->latest('created_at')
+            ->limit(8)
+            ->get()
+            ->map(fn ($finding): array => [
+                'id' => $finding->id,
+                'title' => $finding->title,
+                'severity' => $finding->severity,
+                'priority' => $finding->priority,
+                'status' => $finding->status,
+                'risk_score' => $finding->risk_score,
+                'correlation_score' => $finding->correlation_score,
+                'scanner_key' => $finding->scanner_key ?? $finding->source_tool,
+                'template_id' => $finding->template_id,
+                'affected_url' => $finding->affected_url,
+                'matched_at' => $finding->matched_at?->toISOString(),
+                'raw_artifact_id' => $finding->raw_artifact_id,
+                'has_raw_evidence' => $finding->raw_artifact_id !== null,
             ])
             ->values()
             ->all();

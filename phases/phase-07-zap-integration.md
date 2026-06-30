@@ -1,17 +1,5 @@
-# Phase 07 - ZAP Integration
+# Phase 07 - Superseded ZAP Integration Note
 
-## Goal
+Bu dosyadaki eski ZAP yonu Phase 07 icin uygulanmayacak sekilde superseded edildi.
 
-OWASP ZAP baseline taramasini guvenli scan pipeline'a ekle.
-
-## Deliverables
-
-- ZAP baseline adapter.
-- Limited spider policy.
-- Alert parser.
-- Normalized findings.
-
-## Acceptance
-
-- Active attack modu kapali kalir.
-- ZAP alerts severity/confidence ile kaydedilir.
+Phase 07 artik Finding Normalization, Correlation and Risk Engine fazidir. ZAP baseline adapter, spider policy ve alert parser eklenmeyecek. ZAP ve diger yeni scanner motorlari sonraki fazlarda ayrica onaylanmadan eklenmez.

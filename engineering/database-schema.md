@@ -1,6 +1,6 @@
 # Database Schema Draft
 
-Bu belge Phase 04 itibariyla ScanForge veri modelinin kararlarini tanimlar. Tablo kolonlari uygulama migration'lari ile ayni niyeti tasir; production oncesi indeks ve retention politikalari Phase 12'de sertlestirilecektir.
+Bu belge Phase 06 itibariyla ScanForge veri modelinin kararlarini tanimlar. Tablo kolonlari uygulama migration'lari ile ayni niyeti tasir; production oncesi indeks ve retention politikalari Phase 12'de sertlestirilecektir.
 
 ## Identity and Workspace
 
@@ -32,7 +32,7 @@ Bu belge Phase 04 itibariyla ScanForge veri modelinin kararlarini tanimlar. Tabl
 - Status degerleri: `pending`, `queued`, `starting`, `running`, `paused`, `completed`, `cancelled`, `failed`, `timeout`.
 - Phase 05 alanlari: `workspace_id`, `scan_plan_id`, `safety_mode`, `request_budget`, `timeout_seconds`, `progress_percent`, job counters, `completed_at`, `cancelled_at`, `duration_ms`, `metadata`.
 - Pipeline milestone alanlari Scan uzerindedir: `discovery_completed_at`, `fingerprint_completed_at`, `passive_scan_completed_at`, `deep_scan_completed_at`, `ai_analysis_completed_at`.
-- `scan_jobs`: queue/worker seviyesindeki alt isler. Phase 05 alanlari scanner/module/template, priority, retry, timeout, result summary, worker id, lock key, queue name, execution budget, cancellation token ve heartbeat bilgisini tasir.
+- `scan_jobs`: queue/worker seviyesindeki alt isler. Phase 05 alanlari scanner/module/template, priority, retry, timeout, result summary, worker id, lock key, queue name, execution budget, cancellation token ve heartbeat bilgisini tasir. Phase 06 `job_uuid` ile execution sandbox yolunu belirler.
 - `scan_workers`: worker capability registry ve heartbeat tablosu. `worker_id`, `supported_scanners`, status, current/max jobs ve metadata tutar.
 - `scan_job_timelines`: her job state transition kaydi. AI ve operasyonel timeline icin canonical kayittir.
 - `scan_job_logs`: job seviyesinde timestamped log. Context secret redaction ile yazilir.
@@ -59,6 +59,22 @@ Bu belge Phase 04 itibariyla ScanForge veri modelinin kararlarini tanimlar. Tabl
 ## Findings, Technology and AI
 
 - `findings`: normalize guvenlik bulgusu. Severity degerleri: `critical`, `high`, `medium`, `low`, `info`. Phase 03'te `scan_id` nullable, `asset_discovery_id` nullable alanlari pasif discovery bulgularini scanner run olmadan saklamak icin vardir.
+- Phase 06 finding alanlari: `scanner_key`, `template_id`, `parameter`, `dedupe_hash`, `first_seen_at`, `last_seen_at`, `occurrence_count`, `matched_at`, `description`, `references`, `evidence_json`, `confidence_score`, `false_positive_risk`, `analysis_required`.
+- Phase 07 finding alanlari: `workspace_id`, `canonical_finding_id`, `finding_taxonomy_id`, `normalized_title`, `normalized_description`, `risk_score`, `priority`, `resolved_at`, `reopened_at`, `correlation_key`, `correlation_score`, `related_finding_id`, `asset_type`, `asset_id`, `asset_identifier`, `affected_component`, `affected_parameter`, `cve_json`, `cwe_json`, `cvss_score`, `ai_summary`, `analysis_version`, `analysis_status`, `sla_due_at`.
+- Finding dedupe fingerprint: correlation rule sonucu uretilen stable key hash'idir. Ayni website icin ayni `dedupe_hash` tekrar gelirse satir tekrar acilmaz; `last_seen_at`, `occurrence_count`, sources ve histories guncellenir.
+- Finding status degerleri Phase 07 sonrasi: `new`, `confirmed`, `ignored`, `resolved`, `false_positive`, `reopened`. Eski `open` kayitlari aktif kabul edilir.
+- `finding_histories`: finding status gecislerini saklar. Phase 06 Nuclei tekrar gorulen resolved/ignored bulguyu history'de `reopened` olayi olarak kaydeder.
+- `finding_events`: Phase 07 canonical lifecycle event tablosu. `old_status`, `new_status`, `reason`, `changed_by_user_id`, `changed_at`.
+- `finding_sources`: canonical finding'in scanner/job/artifact/template kaynagini saklar.
+- `finding_evidences`: evidence attachment tablosu. `type`, `mime`, `sha256`, `artifact_id`, `thumbnail`, `preview`.
+- `finding_taxonomies`: category, subcategory, OWASP category, ASVS control, CWE ve CAPEC.
+- `canonical_findings`: normalized key ve default title/description/remediation/references/AI summary template.
+- `risk_score_histories`: risk skoru degisimlerini tutar.
+- `confidence_histories`: confidence degisimlerini tutar.
+- `suppression_rules`: ignored/false-positive kararlarini scanner/template/host kapsaminda kalici hale getirir.
+- `finding_deltas`: scan bazinda `new`, `resolved`, `worsened`, `unchanged` sinyali.
+- `websites` Phase 07 rollup alanlari: `risk_score`, `critical_count`, `high_count`, `risk_trend`.
+- `cve_references`: CVE placeholder tablosu. `cve`, `cvss`, nullable `epss`, nullable `kev`, `vendor`, `product`, `version` tutar. Phase 06 dis veri cekmez.
 - `technology_fingerprints`: teknoloji inventory ana kaydi. Phase 04 alanlari: `workspace_id`, `asset_discovery_id`, `technology_key`, `technology_name`, `quality_score`, `cpe_candidates`, `scanner_recommendations`, `analysis_required`, `analysis_version`, `is_active`, `first_detected_at`, `last_detected_at`, `fingerprint_hash`.
 - `confidence_score` teknolojinin ne kadar kuvvetle tespit edildigini gosterir; `quality_score` kanit cesitliligi ve kanit sayisini gosterir. Ornek: tek header ile PHP confidence yuksek olabilir ama quality dusuk kalabilir.
 - `cpe_candidates` tek string degildir; her aday `{ confidence, source, cpe, version }` seklinde saklanir.
@@ -71,6 +87,14 @@ Bu belge Phase 04 itibariyla ScanForge veri modelinin kararlarini tanimlar. Tabl
 - `scan_plan_items`: onerilen scanner/template modulleri. `recommendation_score` 0-100 arasi oncelik sinyalidir.
 - `ai_analyses`: AI Analyst raporu. `prompt_version`, `model_provider`, `model_name`, `input_tokens`, `output_tokens`, `cost_usd`, `duration_ms` maliyet ve performans takibi icindir.
 
+## Phase 06 Scanner Architecture Tables
+
+- `scanner_template_policies`: scanner bazli template allow/deny policy. `scanner_key`, `template_group`, `allowed`, `safety_level`, `blocked_tags`, `allowed_tags`, `reason` alanlarini tutar.
+- `scanner_versions`: dashboard icin scanner binary/template version tracking. `status` degerleri ornek: `ok`, `disabled`, `unknown`.
+- `template_manifests`: template yonetimi icin manifest placeholder. `template_id`, `group`, `severity`, `tags`, `author`, `signed`, `last_updated`, `deprecated` alanlarini tutar.
+- `scanner_metrics`: scanner bazli run metrigi. `runs`, `success`, `failed`, `timeout`, `avg_runtime`, `avg_findings`.
+- `artifact_manifests`: `raw_artifacts` yaninda checksum, size, mime, compressed ve retention policy tutar.
+
 ## Phase 04 Fingerprint Architecture Tables
 
 - Rule engine DB'ye rule saklamaz; rule ve pluginler kod/config registry uzerinden yuklenir. DB sadece sonuc, kanit, graph ve plan durumunu saklar.
@@ -82,4 +106,4 @@ Bu belge Phase 04 itibariyla ScanForge veri modelinin kararlarini tanimlar. Tabl
 ## Audit and Raw Evidence
 
 - `audit_logs`: user/workspace/action/target metadata. Secret, token, password, cookie, authorization, api_key alanlari redakte edilir.
-- `raw_artifacts`: tool veya mock worker ham ciktisi. Phase 05 mock executor `artifact_type=mock_result`, `scanner_key`, `content` ve `sha256` yazar; secret icermez.
+- `raw_artifacts`: tool veya mock worker ham ciktisi. Phase 05 mock executor `artifact_type=mock_result`, `scanner_key`, `content` ve `sha256` yazar; secret icermez. Phase 06 Nuclei `artifact_type=nuclei_jsonl` yazar ve JSONL icerigi raw request/response olmadan saklar.

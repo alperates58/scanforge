@@ -17,6 +17,8 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         $this->call(ScannerCapabilitySeeder::class);
+        $this->call(ScannerTemplatePolicySeeder::class);
+        $this->call(TemplateManifestSeeder::class);
 
         $user = User::factory()->create([
             'name' => 'Test User',
