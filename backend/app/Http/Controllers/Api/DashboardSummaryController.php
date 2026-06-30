@@ -97,6 +97,12 @@ class DashboardSummaryController extends Controller
                 'monthly_scan_limit' => $workspace->monthly_scan_limit,
                 'scans_used_this_month' => $workspace->scans_used_this_month,
             ],
+            'cms' => [
+                'total_cms_detected' => $metric(fn () => Website::query()->where('workspace_id', $workspace->id)->where('cms_detected', true)->count()),
+                'wordpress_sites' => $metric(fn () => Website::query()->where('workspace_id', $workspace->id)->where('cms_name', 'WordPress')->count()),
+                'other_cms_sites' => $metric(fn () => Website::query()->where('workspace_id', $workspace->id)->where('cms_detected', true)->where('cms_name', '!=', 'WordPress')->count()),
+                'unknown_cms' => $metric(fn () => Website::query()->where('workspace_id', $workspace->id)->where('cms_detected', true)->whereNull('cms_name')->count()),
+            ],
             'worker_metrics' => $scanMetricsService->workspaceMetrics($workspace->id),
             'scanner_versions' => $this->scannerVersions($metric),
             'scanner_metrics' => $this->scannerMetrics($metric),

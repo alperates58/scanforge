@@ -27,6 +27,12 @@ export type DashboardSummary = {
       trend: string;
     }>;
   };
+  cms?: {
+    total_cms_detected: number;
+    wordpress_sites: number;
+    other_cms_sites: number;
+    unknown_cms: number;
+  };
   activity: {
     scans_this_week: number;
     latest_scan_status: string | null;

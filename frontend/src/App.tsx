@@ -103,6 +103,12 @@ const fallbackSummary: DashboardSummary = {
     critical_findings: 0,
     high_findings: 0,
   },
+  cms: {
+    total_cms_detected: 0,
+    wordpress_sites: 0,
+    other_cms_sites: 0,
+    unknown_cms: 0,
+  },
   activity: {
     scans_this_week: 0,
     latest_scan_status: null,
@@ -443,6 +449,23 @@ function DashboardPage() {
             <SafetyRow label="Scanner versions" value={(summary.scanner_versions?.length ?? 0).toString()} good />
             <SafetyRow label="Scanner runs" value={(summary.scanner_metrics ?? []).reduce((total, metric) => total + metric.runs, 0).toString()} good />
             <SafetyRow label="Schema" value={summary.schema_ready ? 'Ready' : 'Awaiting migration'} good={summary.schema_ready} />
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-2">
+        <div className="panel">
+          <div className="panel-heading">
+            <div>
+              <h2>CMS Distribution</h2>
+              <p>{summary.cms?.total_cms_detected ?? 0} websites with CMS detected</p>
+            </div>
+          </div>
+          <div className="space-y-3">
+            <SafetyRow label="Total CMS Detected" value={(summary.cms?.total_cms_detected ?? 0).toString()} good />
+            <SafetyRow label="WordPress Sites" value={(summary.cms?.wordpress_sites ?? 0).toString()} good />
+            <SafetyRow label="Other CMS Sites" value={(summary.cms?.other_cms_sites ?? 0).toString()} good />
+            <SafetyRow label="Unknown CMS" value={(summary.cms?.unknown_cms ?? 0).toString()} good={false} />
           </div>
         </div>
       </section>
@@ -1214,6 +1237,7 @@ function FindingsPanel({
         <FilterSelect label="Severity" value={filters.severity} values={['critical', 'high', 'medium', 'low', 'info']} onChange={(value) => onFiltersChange((current) => ({ ...current, severity: value }))} />
         <FilterSelect label="Priority" value={filters.priority} values={['critical', 'high', 'medium', 'low', 'info']} onChange={(value) => onFiltersChange((current) => ({ ...current, priority: value }))} />
         <FilterSelect label="Status" value={filters.status} values={['new', 'confirmed', 'reopened', 'ignored', 'resolved', 'false_positive']} onChange={(value) => onFiltersChange((current) => ({ ...current, status: value }))} />
+        <FilterSelect label="Scanner" value={filters.scanner_key} values={['nuclei', 'passive_discovery', 'ssl_tls', 'dns_security', 'http_headers', 'cookie_security', 'cms_scanner', 'mock']} onChange={(value) => onFiltersChange((current) => ({ ...current, scanner_key: value }))} />
         <label className="form-field">
           <span>CVE</span>
           <input value={filters.cve ?? ''} onChange={(event) => onFiltersChange((current) => ({ ...current, cve: event.target.value || undefined }))} />

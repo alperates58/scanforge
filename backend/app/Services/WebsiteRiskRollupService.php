@@ -31,6 +31,11 @@ class WebsiteRiskRollupService
         $newRisk = (float) round(($topRisk * 0.6) + ($averageTopTen * 0.4), 2);
         $oldRisk = (float) ($website->risk_score ?? 0);
 
+        $cmsAsset = \App\Models\CmsAsset::query()
+            ->where('website_id', $website->id)
+            ->whereNotNull('cms_name')
+            ->first();
+
         $website->forceFill([
             'risk_score' => $newRisk,
             'critical_count' => (clone $baseQuery)
@@ -44,6 +49,10 @@ class WebsiteRiskRollupService
                 })
                 ->count(),
             'risk_trend' => $this->trend($oldRisk, $newRisk),
+            'cms_detected' => $cmsAsset !== null,
+            'cms_name' => $cmsAsset?->cms_name,
+            'cms_version' => $cmsAsset?->detected_version,
+            'cms_confidence' => $cmsAsset ? ($cmsAsset->confidence === 'exact' ? 100 : ($cmsAsset->confidence === 'probable' ? 80 : 50)) : 0,
         ])->save();
     }
 

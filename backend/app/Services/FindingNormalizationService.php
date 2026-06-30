@@ -143,6 +143,92 @@ class FindingNormalizationService
     }
 
     /**
+     * @param array<string, mixed> $payload
+     */
+    public function persistNativeScannerFinding(ScanJob $scanJob, RawArtifact $rawArtifact, array $payload): ?Finding
+    {
+        $scanJob->loadMissing(['website']);
+        $website = $scanJob->website;
+
+        if (! $website instanceof Website) {
+            return null;
+        }
+
+        $scannerKey = (string) ($payload['scanner_key'] ?? $scanJob->scanner_key);
+        $templateId = (string) ($payload['check_id'] ?? 'unknown-check');
+        $affectedUrl = (string) ($payload['affected_url'] ?? $website->url ?? '');
+
+        if ($affectedUrl === '') {
+            return null;
+        }
+
+        $severity = $this->severity((string) ($payload['severity'] ?? 'info'));
+        $parameter = $this->nullableString($payload['parameter'] ?? null);
+        $references = $this->stringList($payload['references'] ?? []);
+        
+        $confidenceScore = 80;
+        $path = $this->pathFromUrl($affectedUrl);
+        $matchedAt = $this->parseDate($payload['timestamp'] ?? null) ?? Carbon::now();
+        
+        $evidence = $payload['evidence'] ?? [];
+        $title = (string) ($payload['title'] ?? $templateId);
+        
+        $cwe = $this->nullableString($payload['cwe'] ?? null);
+        $cwes = $cwe ? [$cwe] : [];
+        $taxonomy = $this->taxonomyFor($cwes, $title, null);
+
+        return $this->findingCorrelationService->persist($website, [
+            'workspace_id' => $website->workspace_id,
+            'scan_id' => $scanJob->scan_id,
+            'scan_job_id' => $scanJob->id,
+            'raw_artifact_id' => $rawArtifact->id,
+            'scanner_key' => $scannerKey,
+            'source_tool' => 'scanforge-native',
+            'template_id' => $templateId,
+            'title' => $title,
+            'normalized_title' => $this->normalizeText($title),
+            'description' => $this->nullableString($payload['description'] ?? null),
+            'normalized_description' => $this->nullableString($payload['description'] ?? null),
+            'severity' => $severity,
+            'confidence' => $confidenceScore / 100,
+            'confidence_score' => $confidenceScore,
+            'false_positive_risk' => $this->findingRiskEngine->falsePositiveRisk($confidenceScore, $severity),
+            'affected_url' => $affectedUrl,
+            'affected_component' => $payload['affected_component'] ?? $path,
+            'affected_parameter' => $parameter,
+            'parameter' => $parameter,
+            'asset_type' => $payload['asset_type'] ?? 'url',
+            'asset_identifier' => $payload['asset_identifier'] ?? $affectedUrl,
+            'cve' => null,
+            'cve_json' => [],
+            'cwe' => $cwes[0] ?? $taxonomy['cwe'] ?? null,
+            'cwe_json' => $cwes,
+            'cvss' => null,
+            'cvss_score' => null,
+            'owasp_category' => $taxonomy['owasp_category'],
+            'taxonomy' => $taxonomy,
+            'evidence' => $evidence,
+            'evidence_text' => is_string($evidence) ? $evidence : json_encode($evidence, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            'remediation' => $this->nullableString($payload['remediation'] ?? null),
+            'references' => $references,
+            'matched_at' => $matchedAt,
+            'observed_at' => $matchedAt,
+            'source_payload' => $this->redact($payload),
+            'canonical_key' => $this->canonicalKey($templateId, $title, [], $cwes),
+            'internet_exposed' => true,
+            'authentication_required' => false,
+            'metadata' => array_filter([
+                'scanner_key' => $scannerKey,
+                'template_group' => $scanJob->template_group,
+                'scan_module' => $scanJob->scan_module,
+                'cms_name' => $payload['cms_name'] ?? null,
+                'cms_version' => $payload['cms_version'] ?? null,
+                'detection_sources' => $payload['detection_sources'] ?? null,
+            ]),
+        ]);
+    }
+
+    /**
      * @param array{title: string, severity: string, evidence: string, remediation: string, metadata: array<string, mixed>} $data
      */
     public function persistPassiveFinding(Website $website, AssetDiscovery $discovery, array $data): Finding

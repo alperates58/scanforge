@@ -41,6 +41,10 @@ class Website extends Model
         'metadata',
         'notes',
         'tags',
+        'cms_detected',
+        'cms_name',
+        'cms_version',
+        'cms_confidence',
     ];
 
     protected function casts(): array
@@ -60,6 +64,8 @@ class Website extends Model
             'last_observed_at' => 'datetime',
             'metadata' => 'array',
             'tags' => 'array',
+            'cms_detected' => 'boolean',
+            'cms_confidence' => 'integer',
         ];
     }
 
